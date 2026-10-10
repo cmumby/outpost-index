@@ -1,0 +1,9 @@
+name = "Upscayl"
+summary = "Upscale images with AI"
+description = """
+Enlarge and enhance low-resolution images using AI upscaling models, entirely
+on your own computer.
+"""
+source_repo = "https://github.com/upscayl/upscayl"
+categories = ["Graphics"]
+verified = true
