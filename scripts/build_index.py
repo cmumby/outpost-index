@@ -151,7 +151,8 @@ def load_feed():
                 "summary": summarize(description) or item["name"],
                 "description": description,
                 "icon_url": FEED_ICON_BASE + icons[0] if icons else None,
-                "categories": item.get("categories") or [],
+                # Some feed entries have null categories.
+                "categories": [c for c in item.get("categories") or [] if isinstance(c, str)],
                 "repo": repo,
                 "verified": False,
                 "curated": False,
