@@ -8,6 +8,7 @@ source_repo = "https://github.com/zen-browser/desktop"
 categories = ["Network", "WebBrowser"]
 icon_url = "https://raw.githubusercontent.com/zen-browser/desktop/dev/configs/branding/release/logo256.png"
 verified = true
+screenshots = ["https://raw.githubusercontent.com/zen-browser/www/main/src/assets/browser.png"]
 
 # The release also contains .zsync files; these patterns pick the AppImages.
 [assets]

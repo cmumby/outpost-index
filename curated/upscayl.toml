@@ -6,4 +6,8 @@ on your own computer.
 """
 source_repo = "https://github.com/upscayl/upscayl"
 categories = ["Graphics"]
+screenshots = [
+  "https://appimage.github.io/database/Upscayl/screenshot.png",
+  "https://raw.githubusercontent.com/upscayl/upscayl/main/screen1.png",
+]
 verified = true
