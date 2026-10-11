@@ -24,6 +24,9 @@ A longer description for the app's page.
 source_repo = "https://github.com/owner/photocraft"
 categories = ["Graphics"]                 # freedesktop.org categories
 icon_url = "https://example.com/icon.png" # optional; square PNG or SVG
+screenshots = [                           # optional; PNG or JPEG, shown in this order
+  "https://example.com/screenshot-1.png",
+]
 
 # Optional: which release files to use, if the architecture isn't in the file names.
 [assets]
@@ -50,6 +53,7 @@ app's official home.
       "summary": "Share files to nearby devices",
       "description": "…",
       "icon_url": "…",
+      "screenshot_urls": ["…"],
       "categories": ["Network", "Utility"],
       "source_repo": "https://github.com/localsend/localsend",
       "verified": true,
@@ -64,6 +68,7 @@ app's official home.
 ```
 
 - `origin` is `curated` or `appimagehub`. Curated apps are listed first.
+- `screenshot_urls` may be empty. Curated apps without their own use AppImageHub's.
 - `sha256` comes from GitHub when it has one. Otherwise the build downloads the file
   and hashes it, a couple of gigabytes per run, so for a while after a big change
   some files can be `null`. Clients should treat those as unverified.

@@ -7,4 +7,5 @@ with layers, masks, adjustments and familiar tools.
 source_repo = "https://github.com/storytold/photocraft"
 categories = ["Graphics", "Photography"]
 icon_url = "https://raw.githubusercontent.com/storytold/photocraft/main/assets/app-icon/hicolor/256x256/apps/ai.storyteller.photocraft.png"
+screenshots = ["https://raw.githubusercontent.com/storytold/photocraft/main/docs/images/photocraft-demo.jpg"]
 verified = true

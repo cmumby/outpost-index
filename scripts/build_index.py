@@ -124,6 +124,7 @@ def load_curated(folder):
                 "summary": data["summary"],
                 "description": data.get("description", data["summary"]).strip(),
                 "icon_url": data.get("icon_url"),
+                "screenshot_urls": data.get("screenshots", []),
                 "categories": data.get("categories", []),
                 "repo": repo_from_url(data["source_repo"]),
                 "verified": data.get("verified", False),
@@ -151,6 +152,9 @@ def load_feed():
                 "summary": summarize(description) or item["name"],
                 "description": description,
                 "icon_url": FEED_ICON_BASE + icons[0] if icons else None,
+                "screenshot_urls": [
+                    FEED_ICON_BASE + shot for shot in item.get("screenshots") or [] if isinstance(shot, str)
+                ],
                 # Some feed entries have null categories.
                 "categories": [c for c in item.get("categories") or [] if isinstance(c, str)],
                 "repo": repo,
@@ -163,12 +167,15 @@ def load_feed():
 
 def merge(curated, feed):
     """Curated apps win. AppImageHub apps are dropped if they share a repo or id with
-    one we've already got. Curated apps borrow AppImageHub's icon if they lack one."""
+    one we've already got. Curated apps borrow AppImageHub's icon and screenshots if
+    they don't list their own."""
     by_repo = {app["repo"].lower(): app for app in feed}
     for app in curated:
         hub = by_repo.get(app["repo"].lower())
         if hub and not app["icon_url"]:
             app["icon_url"] = hub["icon_url"]
+        if hub and not app["screenshot_urls"]:
+            app["screenshot_urls"] = hub["screenshot_urls"]
 
     apps = list(curated)
     seen_repos = {app["repo"].lower() for app in curated}
@@ -299,6 +306,7 @@ def build_entry(app, release, assets):
         "summary": app["summary"],
         "description": app["description"],
         "icon_url": app["icon_url"],
+        "screenshot_urls": app["screenshot_urls"],
         "categories": app["categories"],
         "source_repo": f"https://github.com/{app['repo']}",
         "verified": app["verified"],
