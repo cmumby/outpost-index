@@ -1,0 +1,5 @@
+# GitHub accounts whose apps are all included in Outpost. Every public repo under
+# these accounts whose latest release has AppImages shows up in the store, marked as
+# verified. Names and summaries come from each repo's description, and the icon is
+# found in the repo's files. Add a file in curated/ to override any of that.
+owners = ["storytold"]

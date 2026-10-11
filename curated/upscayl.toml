@@ -11,3 +11,4 @@ screenshots = [
   "https://raw.githubusercontent.com/upscayl/upscayl/main/screen1.png",
 ]
 verified = true
+featured = true

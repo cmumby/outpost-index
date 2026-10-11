@@ -40,6 +40,25 @@ the latest non-prerelease release.
 `verified = true` is set by maintainers once we've confirmed the repository is the
 app's official home.
 
+## Following a developer
+
+`follow.toml` lists GitHub accounts whose apps are all included:
+
+```toml
+owners = ["storytold"]
+```
+
+Every public repo under those accounts whose latest release has AppImages shows up
+in the store, marked as verified. The name and summary come from the repo
+description ("FilmCraft: An open-source video editor" gives both), and the icon is
+found in the repo's files. A file in `curated/` for the same repo overrides all of it.
+
+## Featured apps
+
+Curated apps with `featured = true` appear in Featured on Outpost's home page. The
+New & Updated and Popular sections are worked out by Outpost from each app's latest
+release date and GitHub stars, so they need no upkeep.
+
 ## index.json
 
 ```json
@@ -57,8 +76,11 @@ app's official home.
       "categories": ["Network", "Utility"],
       "source_repo": "https://github.com/localsend/localsend",
       "verified": true,
+      "featured": true,
       "origin": "curated",
+      "stars": 93998,
       "latest_version": "1.18.2",
+      "released_at": "2026-08-21T09:12:44Z",
       "assets": {
         "x86_64": { "url": "…", "sha256": "…", "size": 66471104 }
       }
@@ -67,7 +89,7 @@ app's official home.
 }
 ```
 
-- `origin` is `curated` or `appimagehub`. Curated apps are listed first.
+- `origin` is `curated`, `followed` or `appimagehub`. Verified apps are listed first.
 - `screenshot_urls` may be empty. Curated apps without their own use AppImageHub's.
 - `sha256` comes from GitHub when it has one. Otherwise the build downloads the file
   and hashes it, a couple of gigabytes per run, so for a while after a big change

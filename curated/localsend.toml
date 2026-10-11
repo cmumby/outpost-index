@@ -8,3 +8,4 @@ source_repo = "https://github.com/localsend/localsend"
 categories = ["Network", "Utility"]
 icon_url = "https://raw.githubusercontent.com/localsend/localsend/main/app/assets/img/logo-256.png"
 verified = true
+featured = true

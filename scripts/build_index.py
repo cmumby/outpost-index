@@ -50,6 +50,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default="site", help="folder to write index.json into")
     parser.add_argument("--curated", default="curated", help="folder of curated app files")
+    parser.add_argument("--follow", default="follow.toml", help="file listing GitHub accounts to include")
     parser.add_argument("--previous", help="URL or path of the last published index.json")
     parser.add_argument("--limit", type=int, help="only process this many apps (for testing)")
     parser.add_argument("--no-hash", action="store_true", help="skip downloading files to hash them")
@@ -60,11 +61,13 @@ def main():
         sys.exit("GITHUB_TOKEN is not set (try: GITHUB_TOKEN=$(gh auth token) ...)")
 
     curated = load_curated(Path(args.curated))
+    followed = load_followed(Path(args.follow), token)
     feed = load_feed()
-    apps = merge(curated, feed)
+    apps = merge(curated + followed, feed)
+    trusted = [app for app in apps if app["origin"] != "appimagehub"]
     if args.limit:
-        apps = curated + [app for app in apps if app not in curated][: args.limit]
-    log(f"{len(curated)} curated + {len(feed)} AppImageHub apps -> {len(apps)} after dedupe")
+        apps = trusted + [app for app in apps if app["origin"] == "appimagehub"][: args.limit]
+    log(f"{len(curated)} curated + {len(followed)} followed + {len(feed)} AppImageHub apps -> {len(apps)} after dedupe")
 
     releases = fetch_releases([app["repo"] for app in apps], token)
     previous = load_previous(args.previous)
@@ -78,6 +81,8 @@ def main():
         assets = pick_assets(release["assets"], app.get("asset_patterns"))
         if not assets:
             continue
+        if app["origin"] == "followed" and not app["icon_url"]:
+            app["icon_url"] = find_icon(app["repo"], token)
         for asset in assets.values():
             if asset["sha256"] is None:
                 asset["sha256"] = previous.get(asset["url"])
@@ -128,11 +133,70 @@ def load_curated(folder):
                 "categories": data.get("categories", []),
                 "repo": repo_from_url(data["source_repo"]),
                 "verified": data.get("verified", False),
-                "curated": True,
+                "featured": data.get("featured", False),
+                "origin": "curated",
                 "asset_patterns": data.get("assets"),
             }
         )
     return apps
+
+
+def load_followed(path, token):
+    """Every public repo under the GitHub accounts in follow.toml. Repos that don't
+    publish AppImages drop out later, when their releases are looked up."""
+    if not path.exists():
+        return []
+    with path.open("rb") as file:
+        owners = tomllib.load(file).get("owners", [])
+    apps = []
+    for owner in owners:
+        cursor = None
+        while True:
+            data = graphql(
+                """query($login: String!, $after: String) {
+                  repositoryOwner(login: $login) {
+                    repositories(first: 100, after: $after, isFork: false, privacy: PUBLIC, ownerAffiliations: OWNER) {
+                      nodes { nameWithOwner name description isArchived }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }""",
+                token,
+                {"login": owner, "after": cursor},
+            )
+            if not data.get("repositoryOwner"):
+                log(f"follow.toml: no GitHub account called {owner}")
+                break
+            repos = data["repositoryOwner"]["repositories"]
+            for repo in repos["nodes"]:
+                if not repo["isArchived"]:
+                    apps.append(followed_app(repo))
+            if not repos["pageInfo"]["hasNextPage"]:
+                break
+            cursor = repos["pageInfo"]["endCursor"]
+    return apps
+
+
+def followed_app(repo):
+    """Name and summary from the repo's description. Descriptions like
+    "FilmCraft: An open-source video editor" give both."""
+    description = (repo["description"] or "").strip()
+    name, summary = repo["name"].replace("-", " ").replace("_", " ").title(), description
+    label, colon, rest = description.partition(":")
+    if colon and label.replace(" ", "").lower() in repo["name"].replace("-", "").lower():
+        name, summary = label.strip(), rest.strip()
+    return {
+        "id": make_id(repo["name"]),
+        "name": name,
+        "summary": capitalize(summarize(summary)) or name,
+        "description": description,
+        "icon_url": None,
+        "screenshot_urls": [],
+        "categories": [],
+        "repo": repo["nameWithOwner"],
+        "verified": True,
+        "origin": "followed",
+    }
 
 
 def load_feed():
@@ -159,28 +223,28 @@ def load_feed():
                 "categories": [c for c in item.get("categories") or [] if isinstance(c, str)],
                 "repo": repo,
                 "verified": False,
-                "curated": False,
+                "origin": "appimagehub",
             }
         )
     return apps
 
 
-def merge(curated, feed):
-    """Curated apps win. AppImageHub apps are dropped if they share a repo or id with
-    one we've already got. Curated apps borrow AppImageHub's icon and screenshots if
-    they don't list their own."""
+def merge(trusted, feed):
+    """Curated apps win, then followed ones, then AppImageHub's. An app is dropped if
+    it shares a repo or id with one we've already got. Curated and followed apps
+    borrow AppImageHub's icon and screenshots if they don't have their own."""
     by_repo = {app["repo"].lower(): app for app in feed}
-    for app in curated:
+    for app in trusted:
         hub = by_repo.get(app["repo"].lower())
         if hub and not app["icon_url"]:
             app["icon_url"] = hub["icon_url"]
         if hub and not app["screenshot_urls"]:
             app["screenshot_urls"] = hub["screenshot_urls"]
 
-    apps = list(curated)
-    seen_repos = {app["repo"].lower() for app in curated}
-    seen_ids = {app["id"] for app in curated}
-    for app in feed:
+    apps = []
+    seen_repos = set()
+    seen_ids = set()
+    for app in trusted + feed:
         if app["repo"].lower() in seen_repos or app["id"] in seen_ids:
             continue
         seen_repos.add(app["repo"].lower())
@@ -222,7 +286,7 @@ def fetch_releases(repos, token):
             owner, name = repo.split("/", 1)
             fields.append(
                 f"r{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{"
-                " nameWithOwner latestRelease { tagName"
+                " nameWithOwner stargazerCount latestRelease { tagName publishedAt"
                 " releaseAssets(first: 100) { nodes { name size downloadUrl digest } } } }"
             )
         data = graphql("query { " + " ".join(fields) + " }", token)
@@ -232,16 +296,18 @@ def fetch_releases(repos, token):
             if release:
                 releases[repo.lower()] = {
                     "tag": release["tagName"],
+                    "published_at": release["publishedAt"],
+                    "stars": result["stargazerCount"],
                     "assets": release["releaseAssets"]["nodes"],
                 }
         log(f"  looked up {min(start + BATCH_SIZE, len(repos))}/{len(repos)} repos")
     return releases
 
 
-def graphql(query, token):
+def graphql(query, token, variables=None):
     request = urllib.request.Request(
         GRAPHQL_URL,
-        data=json.dumps({"query": query}).encode(),
+        data=json.dumps({"query": query, "variables": variables or {}}).encode(),
         headers={"Authorization": f"bearer {token}", "User-Agent": USER_AGENT},
     )
     for attempt in range(6):
@@ -262,6 +328,34 @@ def graphql(query, token):
         if error.get("type") != "NOT_FOUND":
             sys.exit(f"GitHub API error: {error.get('message')}")
     return body.get("data") or {}
+
+
+def find_icon(repo, token):
+    """Looks through a repo's files for its app icon, preferring the standard Linux
+    icon folders (hicolor/256x256/apps and friends)."""
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/git/trees/HEAD?recursive=1",
+        headers={"Authorization": f"bearer {token}", "User-Agent": USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            paths = [item["path"] for item in json.load(response)["tree"] if item["type"] == "blob"]
+    except (OSError, urllib.error.URLError, KeyError, json.JSONDecodeError):
+        return None
+
+    def score(path):
+        lower = path.lower()
+        if not lower.endswith((".png", ".svg")) or re.search(r"favicon|android|ios/|macos|windows|test", lower):
+            return None
+        for rank, folder in enumerate(["hicolor/256x256/apps/", "hicolor/512x512/apps/", "hicolor/scalable/apps/", "hicolor/128x128/apps/"]):
+            if folder in lower:
+                return rank
+        if re.search(r"(^|/)(app[-_]?)?icons?[-_/]", lower) or "/icon." in lower or "logo" in lower:
+            return 10
+        return None
+
+    ranked = sorted((s, len(path), path) for path in paths if (s := score(path)) is not None)
+    return f"https://raw.githubusercontent.com/{repo}/HEAD/{ranked[0][2]}" if ranked else None
 
 
 # --- Building entries -----------------------------------------------------------
@@ -310,8 +404,11 @@ def build_entry(app, release, assets):
         "categories": app["categories"],
         "source_repo": f"https://github.com/{app['repo']}",
         "verified": app["verified"],
-        "origin": "curated" if app["curated"] else "appimagehub",
+        "featured": app.get("featured", False),
+        "origin": app["origin"],
+        "stars": release["stars"],
         "latest_version": release["tag"].removeprefix("v"),
+        "released_at": release["published_at"],
         "assets": assets,
     }
 
@@ -348,6 +445,10 @@ def summarize(description, limit=90):
     """First sentence of a description, cut down to fit on one line."""
     first = re.split(r"(?<=[.!?])\s", description, maxsplit=1)[0].rstrip(".")
     return first if len(first) <= limit else first[: limit - 1].rsplit(" ", 1)[0] + "…"
+
+
+def capitalize(text):
+    return text[:1].upper() + text[1:]
 
 
 def get_json(url):
