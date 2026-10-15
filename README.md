@@ -81,6 +81,7 @@ release date and GitHub stars, so they need no upkeep.
       "stars": 93998,
       "latest_version": "1.18.2",
       "released_at": "2026-08-21T09:12:44Z",
+      "downloads": 12400,
       "assets": {
         "x86_64": { "url": "…", "sha256": "…", "size": 66471104 }
       }
@@ -90,6 +91,8 @@ release date and GitHub stars, so they need no upkeep.
 ```
 
 - `origin` is `curated`, `followed` or `appimagehub`. Verified apps are listed first.
+- `downloads` counts GitHub downloads of the latest version's AppImages, by
+  anyone, not only through Outpost. `stars` is the source repo's GitHub stars.
 - `screenshot_urls` may be empty. Curated apps without their own use AppImageHub's.
 - `sha256` comes from GitHub when it has one. Otherwise the build downloads the file
   and hashes it, a couple of gigabytes per run, so for a while after a big change

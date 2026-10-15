@@ -287,7 +287,7 @@ def fetch_releases(repos, token):
             fields.append(
                 f"r{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{"
                 " nameWithOwner stargazerCount latestRelease { tagName publishedAt"
-                " releaseAssets(first: 100) { nodes { name size downloadUrl digest } } } }"
+                " releaseAssets(first: 100) { nodes { name size downloadUrl digest downloadCount } } } }"
             )
         data = graphql("query { " + " ".join(fields) + " }", token)
         for i, repo in enumerate(batch):
@@ -409,6 +409,12 @@ def build_entry(app, release, assets):
         "stars": release["stars"],
         "latest_version": release["tag"].removeprefix("v"),
         "released_at": release["published_at"],
+        # Downloads of this version's AppImages from GitHub, by anyone (not just Outpost).
+        "downloads": sum(
+            asset.get("downloadCount") or 0
+            for asset in release["assets"]
+            if asset["name"].lower().endswith(".appimage")
+        ),
         "assets": assets,
     }
 
