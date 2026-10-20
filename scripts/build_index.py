@@ -39,6 +39,10 @@ BATCH_SIZE = 50
 # later runs (the previous index remembers checksums we've already worked out).
 HASH_BUDGET_BYTES = 2 * 1024**3
 
+# Release notes longer than this are cut short; the full notes are a click away on
+# GitHub.
+MAX_NOTES_CHARS = 20_000
+
 ARCH_PATTERNS = {
     "x86_64": re.compile(r"x86[_-]64|amd64|x64", re.I),
     "aarch64": re.compile(r"aarch64|arm64", re.I),
@@ -103,7 +107,12 @@ def main():
     }
 
     out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+    notes_dir = out / "notes"
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    for entry in entries:
+        notes = entry.pop("_notes")
+        if notes:
+            (notes_dir / f"{entry['id']}.md").write_text(notes)
     (out / "index.json").write_text(json.dumps(index, indent=1, ensure_ascii=False))
 
     unhashed = sum(1 for e in entries for a in e["assets"].values() if a["sha256"] is None)
@@ -286,7 +295,7 @@ def fetch_releases(repos, token):
             owner, name = repo.split("/", 1)
             fields.append(
                 f"r{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{"
-                " nameWithOwner stargazerCount latestRelease { tagName publishedAt"
+                " nameWithOwner stargazerCount latestRelease { tagName publishedAt url description"
                 " releaseAssets(first: 100) { nodes { name size downloadUrl digest downloadCount } } } }"
             )
         data = graphql("query { " + " ".join(fields) + " }", token)
@@ -297,6 +306,8 @@ def fetch_releases(repos, token):
                 releases[repo.lower()] = {
                     "tag": release["tagName"],
                     "published_at": release["publishedAt"],
+                    "url": release["url"],
+                    "notes": (release["description"] or "").strip(),
                     "stars": result["stargazerCount"],
                     "assets": release["releaseAssets"]["nodes"],
                 }
@@ -409,6 +420,10 @@ def build_entry(app, release, assets):
         "stars": release["stars"],
         "latest_version": release["tag"].removeprefix("v"),
         "released_at": release["published_at"],
+        "release_url": release["url"],
+        # The notes themselves go in notes/<id>.md, fetched only when someone looks.
+        "has_release_notes": bool(release["notes"]),
+        "_notes": release["notes"][:MAX_NOTES_CHARS],
         # Downloads of this version's AppImages from GitHub, by anyone (not just Outpost).
         "downloads": sum(
             asset.get("downloadCount") or 0
