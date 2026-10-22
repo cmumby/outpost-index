@@ -116,6 +116,16 @@ GITHUB_TOKEN=$(gh auth token) python3 scripts/build_index.py --out site --limit 
 `--limit 50` processes the curated apps plus 50 from AppImageHub, which is quick.
 `--no-hash` skips downloading files to hash them.
 
+Tests (also run before every build):
+
+```bash
+python3 -m unittest discover scripts
+```
+
+Descriptions are cleaned up as the index is built: HTML (common in AppImageHub's
+AppStream descriptions) becomes simple Markdown (paragraphs, "- " bullets,
+`code`, **bold**, *italic*, web links), and summaries become plain one-line text.
+
 ## Keeping it running
 
 GitHub pauses scheduled workflows in repositories with no activity for 60 days. If

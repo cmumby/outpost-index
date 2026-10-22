@@ -13,6 +13,8 @@ Uses only the Python standard library (3.11+ for tomllib).
 import argparse
 import fnmatch
 import hashlib
+import html
+import html.parser
 import json
 import os
 import re
@@ -222,7 +224,7 @@ def load_feed():
             {
                 "id": make_id(item["name"]),
                 "name": item["name"],
-                "summary": summarize(description) or item["name"],
+                "summary": summarize(plain_line(tidy_text(description))) or item["name"],
                 "description": description,
                 "icon_url": FEED_ICON_BASE + icons[0] if icons else None,
                 "screenshot_urls": [
@@ -408,8 +410,8 @@ def build_entry(app, release, assets):
     return {
         "id": app["id"],
         "name": app["name"],
-        "summary": app["summary"],
-        "description": app["description"],
+        "summary": plain_line(app["summary"]),
+        "description": tidy_text(app["description"]),
         "icon_url": app["icon_url"],
         "screenshot_urls": app["screenshot_urls"],
         "categories": app["categories"],
@@ -460,6 +462,109 @@ def repo_from_url(url):
 
 def make_id(name):
     return re.sub(r"[^a-z0-9._-]+", "-", name.lower()).strip("._-") or "app"
+
+
+class _Tidier(html.parser.HTMLParser):
+    """Turns the HTML some descriptions use (AppStream's <p>, <ul>, <li> and
+    friends) into the simple Markdown Outpost shows: paragraphs, "- " bullets,
+    `code`, **bold**, *italic* and web links. Any other tag is dropped and its text
+    kept."""
+
+    BLOCKS = {"p", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "pre", "blockquote", "tr"}
+    SKIPPED = {"script", "style", "head", "title"}
+    MARKS = {"code": "`", "tt": "`", "kbd": "`", "b": "**", "strong": "**", "i": "*", "em": "*"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.blocks = []
+        self.line = ""
+        self.lists = []  # One entry per open list: its next number, or None for bullets.
+        self.skipping = 0
+        self.link = None
+
+    def end_line(self):
+        if self.line.strip():
+            self.blocks.append(self.line.rstrip())
+        self.line = ""
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIPPED:
+            self.skipping += 1
+        elif tag in self.BLOCKS:
+            self.end_line()
+            if tag in ("ul", "ol"):
+                self.lists.append(1 if tag == "ol" else None)
+            elif tag == "li" and self.lists:
+                number = self.lists[-1]
+                self.line = "  " * (len(self.lists) - 1) + (f"{number}. " if number else "- ")
+                if number:
+                    self.lists[-1] += 1
+            elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                self.line = "## "
+        elif tag in self.MARKS:
+            self.line += self.MARKS[tag]
+        elif tag == "a":
+            href = dict(attrs).get("href") or ""
+            self.link = href if href.startswith(("https://", "http://")) else None
+            if self.link:
+                self.line += "["
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIPPED:
+            self.skipping = max(0, self.skipping - 1)
+        elif tag in self.BLOCKS:
+            self.end_line()
+            if tag in ("ul", "ol") and self.lists:
+                self.lists.pop()
+        elif tag in self.MARKS:
+            self.line = self.line.rstrip() + self.MARKS[tag]
+        elif tag == "a" and self.link:
+            self.line = self.line.rstrip() + f"]({self.link})"
+            self.link = None
+
+    def handle_data(self, data):
+        if self.skipping:
+            return
+        # HTML treats any run of spaces and line breaks as one space.
+        text = re.sub(r"\s+", " ", data)
+        if not self.line.strip() or self.line.endswith((" ", "[")):
+            text = text.lstrip()
+        self.line += text
+
+    def text(self):
+        self.end_line()
+        # Lines of one list stay together; everything else is its own paragraph.
+        out = []
+        for block in self.blocks:
+            is_item = re.match(r"\s*(- |\d+\. )", block)
+            if out and not (is_item and re.match(r"\s*(- |\d+\. )", out[-1])):
+                out.append("")
+            out.append(block)
+        # Marks with nothing inside (like <b></b>) would show as stray asterisks.
+        return re.sub(r"(\*\*|`)\s*\1", "", "\n".join(out))
+
+
+def tidy_text(text):
+    """A description in the simple Markdown Outpost shows. HTML is converted;
+    text without any is only unescaped (&amp; and the like)."""
+    text = (text or "").strip()
+    if not re.search(r"</?[a-zA-Z][a-zA-Z0-9]*(\s[^<>]*)?/?>", text):
+        return html.unescape(text)
+    tidier = _Tidier()
+    tidier.feed(text)
+    tidier.close()
+    return tidier.text()
+
+
+def plain_line(text):
+    """Text for a single line, such as a summary: no HTML, no Markdown marks,
+    no line breaks."""
+    text = tidy_text(text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"(^|\n)\s*(#+|-|\d+\.) ", r"\1", text)
+    text = re.sub(r"\*\*|__|`", "", text)
+    text = re.sub(r"(?<!\w)\*(\S[^*]*?)\*(?!\w)", r"\1", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def summarize(description, limit=90):
