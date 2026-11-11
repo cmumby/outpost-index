@@ -287,34 +287,53 @@ def load_previous(location):
 # --- GitHub ---------------------------------------------------------------------
 
 
+class QueryTooBig(Exception):
+    """GitHub refused a query for being too heavy (too much data at once)."""
+
+
 def fetch_releases(repos, token):
     """Latest (non-prerelease) release for each repo, keyed by lowercase owner/name."""
     releases = {}
     for start in range(0, len(repos), BATCH_SIZE):
-        batch = repos[start : start + BATCH_SIZE]
-        fields = []
-        for i, repo in enumerate(batch):
-            owner, name = repo.split("/", 1)
-            fields.append(
-                f"r{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{"
-                " nameWithOwner stargazerCount latestRelease { tagName publishedAt url description"
-                " releaseAssets(first: 100) { nodes { name size downloadUrl digest downloadCount } } } }"
-            )
-        data = graphql("query { " + " ".join(fields) + " }", token)
-        for i, repo in enumerate(batch):
-            result = data.get(f"r{i}")
-            release = result and result["latestRelease"]
-            if release:
-                releases[repo.lower()] = {
-                    "tag": release["tagName"],
-                    "published_at": release["publishedAt"],
-                    "url": release["url"],
-                    "notes": (release["description"] or "").strip(),
-                    "stars": result["stargazerCount"],
-                    "assets": release["releaseAssets"]["nodes"],
-                }
+        fetch_batch(repos[start : start + BATCH_SIZE], token, releases)
         log(f"  looked up {min(start + BATCH_SIZE, len(repos))}/{len(repos)} repos")
     return releases
+
+
+def fetch_batch(batch, token, releases):
+    """Looks up one batch of repos. If GitHub says the batch is too heavy (long
+    release notes and many assets add up), it splits it in half and tries again."""
+    fields = []
+    for i, repo in enumerate(batch):
+        owner, name = repo.split("/", 1)
+        fields.append(
+            f"r{i}: repository(owner: {json.dumps(owner)}, name: {json.dumps(name)}) {{"
+            " nameWithOwner stargazerCount latestRelease { tagName publishedAt url description"
+            " releaseAssets(first: 100) { nodes { name size downloadUrl digest downloadCount } } } }"
+        )
+    try:
+        data = graphql("query { " + " ".join(fields) + " }", token)
+    except QueryTooBig as error:
+        if len(batch) == 1:
+            log(f"  skipping {batch[0]}: {error}")
+            return
+        half = len(batch) // 2
+        log(f"  GitHub said a batch of {len(batch)} was too much; trying {half} and {len(batch) - half}")
+        fetch_batch(batch[:half], token, releases)
+        fetch_batch(batch[half:], token, releases)
+        return
+    for i, repo in enumerate(batch):
+        result = data.get(f"r{i}")
+        release = result and result["latestRelease"]
+        if release:
+            releases[repo.lower()] = {
+                "tag": release["tagName"],
+                "published_at": release["publishedAt"],
+                "url": release["url"],
+                "notes": (release["description"] or "").strip(),
+                "stars": result["stargazerCount"],
+                "assets": release["releaseAssets"]["nodes"],
+            }
 
 
 def graphql(query, token, variables=None):
@@ -338,8 +357,13 @@ def graphql(query, token, variables=None):
             time.sleep(wait)
     # Deleted or renamed repos come back as errors alongside the data; that's fine.
     for error in body.get("errors", []):
+        message = error.get("message") or ""
+        # "Resource limits ... exceeded" and "Something went wrong while executing
+        # your query" both mean the query was too heavy for GitHub to finish.
+        if "Resource limits" in message or "Something went wrong" in message:
+            raise QueryTooBig(message)
         if error.get("type") != "NOT_FOUND":
-            sys.exit(f"GitHub API error: {error.get('message')}")
+            sys.exit(f"GitHub API error: {message}")
     return body.get("data") or {}
 
 

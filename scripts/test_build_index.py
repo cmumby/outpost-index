@@ -3,9 +3,12 @@
     python3 -m unittest discover scripts
 """
 
+import re
 import unittest
+from unittest import mock
 
-from build_index import plain_line, summarize, tidy_text
+import build_index
+from build_index import QueryTooBig, fetch_releases, plain_line, summarize, tidy_text
 
 
 class TidyText(unittest.TestCase):
@@ -64,6 +67,23 @@ class PlainLine(unittest.TestCase):
     def test_summary_of_a_list_only_description(self):
         description = "<ul><li>Simple Qt UI with progress dialogs.</li><li>No file size limits.</li></ul>"
         self.assertEqual(summarize(plain_line(tidy_text(description))), "Simple Qt UI with progress dialogs")
+
+
+class FetchReleases(unittest.TestCase):
+    def test_splits_batches_github_says_are_too_heavy(self):
+        # GitHub refuses queries for more than 10 repos here, and "heavy/app" always.
+        def fake_graphql(query, token):
+            repos = re.findall(r'repository\(owner: "(\w+)", name: "(\w+)"\)', query)
+            if len(repos) > 10 or ("heavy", "app") in repos:
+                raise QueryTooBig("Resource limits for this query exceeded.")
+            release = {"tagName": "v1", "publishedAt": "", "url": "", "description": "", "releaseAssets": {"nodes": []}}
+            return {f"r{i}": {"stargazerCount": 0, "latestRelease": release} for i in range(len(repos))}
+
+        repos = [f"owner/app{n}" for n in range(30)] + ["heavy/app"]
+        with mock.patch.object(build_index, "graphql", fake_graphql), mock.patch.object(build_index, "log"):
+            releases = fetch_releases(repos, "token")
+        self.assertEqual(len(releases), 30, "every repo but the one GitHub always refuses")
+        self.assertNotIn("heavy/app", releases)
 
 
 if __name__ == "__main__":
